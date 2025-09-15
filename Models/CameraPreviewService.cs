@@ -169,20 +169,20 @@ namespace spectrum.Models
 
             var pipelines = new[]
 {
-    // 优先 MJPEG：输入 mjpeg，输出强制 1280x720@31，BGRA 原始帧
+    // 优先 MJPEG：输入 mjpeg，输出 BGRA 原始帧（帧率按参数控制）
     $"-hide_banner -loglevel warning -fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0 " +
-    $"-f v4l2 -input_format mjpeg -framerate 31 -video_size {w}x{h} -i {devicePath} " +
-    $"-vf \"scale={w}:{h}:flags=fast_bilinear,fps=31,format=bgra\" -pix_fmt bgra -f rawvideo -",
+    $"-f v4l2 -input_format mjpeg -framerate {fps} -video_size {w}x{h} -i {devicePath} " +
+    $"-vf \"fps={fps}\" -pix_fmt bgra -f rawvideo -",
 
-    // 备选 YUYV422：同样输出 BGRA
+    // 备选 YUYV422：同样输出 BGRA，帧率按参数控制
     $"-hide_banner -loglevel warning -fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0 " +
-    $"-f v4l2 -input_format yuyv422 -framerate 31 -video_size {w}x{h} -i {devicePath} " +
-    $"-vf \"scale={w}:{h}:flags=fast_bilinear,fps=31,format=bgra\" -pix_fmt bgra -f rawvideo -",
+    $"-f v4l2 -input_format yuyv422 -framerate {fps} -video_size {w}x{h} -i {devicePath} " +
+    $"-vf \"fps={fps}\" -pix_fmt bgra -f rawvideo -",
 
-    // 兜底：让 v4l2 自选输入格式，输出端依旧强制
+    // 兜底：让 v4l2 自选输入格式，帧率按参数控制
     $"-hide_banner -loglevel warning -fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0 " +
-    $"-f v4l2 -framerate 31 -video_size {w}x{h} -i {devicePath} " +
-    $"-vf \"scale={w}:{h}:flags=fast_bilinear,fps=31,format=bgra\" -pix_fmt bgra -f rawvideo -"
+    $"-f v4l2 -framerate {fps} -video_size {w}x{h} -i {devicePath} " +
+    $"-vf \"fps={fps}\" -pix_fmt bgra -f rawvideo -"
 };
 
 
@@ -378,7 +378,6 @@ namespace spectrum.Models
         private unsafe void PipePreviewLoop(CancellationToken token)
         {
             if (_pipeStream == null || _pipeBuffer == null) return;
-
             var sw = Stopwatch.StartNew();
             int frames = 0;
             double actualFps = 0;
@@ -511,31 +510,19 @@ namespace spectrum.Models
                 // 保存原始数据（统一保存为 BGRA）
                 if (_dataSaveService?.IsRecording == true && _dataSaveService.Options.SaveRawFrames)
                 {
-                    byte[] bgraData = bgra.ToBytes();
-                    _dataSaveService.SaveRawFrame(bgraData, _previewWidth, _previewHeight, "bin", true);
+                    int dataSize = _previewWidth * _previewHeight * 4;
+                    ReadOnlySpan<byte> span = new ReadOnlySpan<byte>((byte*)bgra.Data.ToPointer(), dataSize);
+                    _dataSaveService.SaveRawFrame(span, _previewWidth, _previewHeight, "bin", true);
                 }
 
                 try
                 {
-                    var wb = new WriteableBitmap(
-                        new PixelSize(_previewWidth, _previewHeight),
-                        new Vector(96, 96),
-                        PixelFormat.Bgra8888,
-                        AlphaFormat.Premul);
-
-                    BlitBGRAtoBitmap(bgra, wb, _previewWidth, _previewHeight);
-
-                    var old = _previewBitmap;
-                    _previewBitmap = wb;
-                    RaisePreviewImageUpdated(_previewBitmap);
-
-                    if (old != null)
+                    if (_previewBitmap != null)
                     {
-                        Task.Run(() =>
-                        {
-                            Thread.Sleep(50);
-                            try { old.Dispose(); } catch { }
-                        });
+                        using var locked = _previewBitmap.Lock();
+                        int bytes = checked(_previewWidth * _previewHeight * 4);
+                        Buffer.MemoryCopy((void*)bgra.Data, (void*)locked.Address, bytes, bytes);
+                        RaisePreviewImageUpdated(_previewBitmap);
                     }
                 }
                 catch { }
@@ -569,16 +556,6 @@ namespace spectrum.Models
                 pos += n;
             }
             return true;
-        }
-
-        /// <summary>把 BGRA Mat 的像素拷到 Avalonia WriteableBitmap。</summary>
-        private static unsafe void BlitBGRAtoBitmap(Mat bgra, WriteableBitmap wb, int width, int height)
-        {
-            if (bgra.Empty()) return;
-            using var locked = wb.Lock();
-            int bytes = checked(width * height * 4);
-            IntPtr src = bgra.Data; // IntPtr，不再对 byte* 调用 ToPointer（避免 CS1061）
-            Buffer.MemoryCopy((void*)src, (void*)locked.Address, bytes, bytes);
         }
 
         private void RaisePreviewImageUpdated(IImage? image)
