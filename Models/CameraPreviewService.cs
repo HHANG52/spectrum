@@ -376,73 +376,97 @@ namespace spectrum.Models
         /// Linux：从 FFmpeg stdout 读取 BGR24 → 转 BGRA → 写入 WriteableBitmap
         /// </summary>
         private unsafe void PipePreviewLoop(CancellationToken token)
-{
-    if (_pipeStream == null || _pipeBuffer == null) return;
-
-    var sw = Stopwatch.StartNew();
-    int frames = 0;
-    double actualFps = 0;
-
-    while (!token.IsCancellationRequested)
-    {
-        // 读取一整帧（BGRA：W*H*4 字节）
-        if (!ReadFull(_pipeStream, _pipeBuffer, _pipeBuffer.Length, token))
         {
-            RaiseStatusUpdated("从 FFmpeg 读取帧失败，尝试重连...");
-            Thread.Sleep(500);
-            try
-            {
-                StopFfmpegPipe();
-                if (_currentCamera != null)
-                    StartFfmpegPipeAsync(_currentCamera.DeviceId, _previewWidth, _previewHeight, _targetFps)
-                        .GetAwaiter().GetResult();
-            }
-            catch (Exception ex)
-            {
-                RaiseStatusUpdated($"重连失败: {ex.Message}");
-                Thread.Sleep(1500);
-            }
-            continue;
-        }
+            if (_pipeStream == null || _pipeBuffer == null) return;
+            var sw = Stopwatch.StartNew();
+            int frames = 0;
+            double actualFps = 0;
+            int lastFrameMs = 0;
 
-        // 将读取的 BGRA 数据直接拷贝到缓存的 WriteableBitmap
-        try
-        {
-            // 保存原始BGRA数据（如果正在录制且启用了原始帧保存选项）
-            if (_dataSaveService?.IsRecording == true && _dataSaveService.Options.SaveRawFrames)
+            while (!token.IsCancellationRequested)
             {
-                byte[] bgraData = new byte[_pipeBuffer.Length];
-                Array.Copy(_pipeBuffer, bgraData, _pipeBuffer.Length);
-                _dataSaveService.SaveRawFrame(bgraData, _pipeW, _pipeH, "bin", true);
-            }
+                var frameSw = Stopwatch.StartNew();
 
-            if (_previewBitmap != null)
-            {
-                using var locked = _previewBitmap.Lock();
-                fixed (byte* src = _pipeBuffer)
+                // 读取一整帧（BGRA：W*H*4 字节）
+                if (!ReadFull(_pipeStream, _pipeBuffer, _pipeBuffer.Length, token))
                 {
-                   _dataSaveService.SaveRawFrame(_pipeBuffer, _pipeW, _pipeH, "bin", true);
+                    RaiseStatusUpdated("从 FFmpeg 读取帧失败，尝试重连...");
+                    Thread.Sleep(500);
+                    try
+                    {
+                        StopFfmpegPipe();
+                        if (_currentCamera != null)
+                            StartFfmpegPipeAsync(_currentCamera.DeviceId, _previewWidth, _previewHeight, _targetFps)
+                                .GetAwaiter().GetResult();
+                    }
+                    catch (Exception ex)
+                    {
+                        RaiseStatusUpdated($"重连失败: {ex.Message}");
+                        Thread.Sleep(1500);
+                    }
+                    continue;
                 }
-                RaisePreviewImageUpdated(_previewBitmap);
+
+                // 将外部 BGRA 缓冲“零拷贝”挂成 Mat，再直接 Blit 到 WriteableBitmap
+                try
+                {
+                    fixed (byte* p = _pipeBuffer)
+                    {
+                        using var bgra = Mat.FromPixelData(_pipeH, _pipeW, MatType.CV_8UC4, (IntPtr)p, _pipeStride);
+
+                        // 保存原始BGRA数据（如果正在录制且启用了原始帧保存选项）
+                        if (_dataSaveService?.IsRecording == true && _dataSaveService.Options.SaveRawFrames)
+                        {
+                            // 复制原始BGRA数据
+                            byte[] bgraData = new byte[_pipeBuffer.Length];
+                            Array.Copy(_pipeBuffer, bgraData, _pipeBuffer.Length);
+                            _dataSaveService.SaveRawFrame(bgraData, _pipeW, _pipeH, "bin", true);
+                        }
+
+                        var wb = new WriteableBitmap(
+                            new PixelSize(_previewWidth, _previewHeight),
+                            new Vector(96, 96),
+                            PixelFormat.Bgra8888,
+                            AlphaFormat.Premul);
+
+                        BlitBGRAtoBitmap(bgra, wb, _previewWidth, _previewHeight);
+
+                        var old = _previewBitmap;
+                        _previewBitmap = wb;
+                        RaisePreviewImageUpdated(_previewBitmap);
+
+                        if (old != null)
+                        {
+                            Task.Run(() =>
+                            {
+                                Thread.Sleep(50);
+                                try { old.Dispose(); } catch { }
+                            });
+                        }
+                    }
+                }
+                catch
+                {
+                    // 忽略单帧 UI 写入异常，继续下一帧
+                }
+
+                frameSw.Stop();
+                lastFrameMs = (int)frameSw.ElapsedMilliseconds;
+
+                frames++;
+                if (sw.ElapsedMilliseconds >= 2000)
+                {
+                    actualFps = frames * 1000.0 / sw.ElapsedMilliseconds;
+                    frames = 0;
+                    sw.Restart();
+                    RaiseVideoStatsUpdated(new VideoStats($"{_previewWidth}x{_previewHeight}", actualFps, lastFrameMs));
+                }
+
+                var delay = _frameDelayMs - lastFrameMs;
+                if (delay > 0)
+                    Thread.Sleep(delay);
             }
         }
-        catch
-        {
-            // 忽略单帧 UI 写入异常，继续下一帧
-        }
-
-        frames++;
-        if (sw.ElapsedMilliseconds >= 2000)
-        {
-            actualFps = frames * 1000.0 / sw.ElapsedMilliseconds;
-            frames = 0;
-            sw.Restart();
-            RaiseVideoStatsUpdated(new VideoStats($"{_previewWidth}x{_previewHeight}", actualFps, _frameDelayMs));
-        }
-
-        Thread.Sleep(Math.Max(1, _frameDelayMs - 5));
-    }
-}
 
 
         /// <summary>
@@ -456,8 +480,15 @@ namespace spectrum.Models
             using var resized = new Mat();
             using var bgra = new Mat();
 
+            var sw = Stopwatch.StartNew();
+            int frames = 0;
+            double actualFps = 0;
+            int lastFrameMs = 0;
+
             while (!token.IsCancellationRequested)
             {
+                var frameSw = Stopwatch.StartNew();
+
                 if (!_videoCapture.Read(frame) || frame.Empty())
                 {
                     Thread.Sleep(10);
@@ -496,7 +527,21 @@ namespace spectrum.Models
                 }
                 catch { }
 
-                Thread.Sleep(Math.Max(1, _frameDelayMs - 5));
+                frameSw.Stop();
+                lastFrameMs = (int)frameSw.ElapsedMilliseconds;
+
+                frames++;
+                if (sw.ElapsedMilliseconds >= 2000)
+                {
+                    actualFps = frames * 1000.0 / sw.ElapsedMilliseconds;
+                    frames = 0;
+                    sw.Restart();
+                    RaiseVideoStatsUpdated(new VideoStats($"{_previewWidth}x{_previewHeight}", actualFps, lastFrameMs));
+                }
+
+                var delay = _frameDelayMs - lastFrameMs;
+                if (delay > 0)
+                    Thread.Sleep(delay);
             }
         }
 
