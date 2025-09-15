@@ -1,0 +1,25 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="spectrum.App"
+             xmlns:local="using:spectrum"
+             xmlns:converters="using:spectrum.Models.Converters"
+             RequestedThemeVariant="Default">
+             <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
+
+    <Application.DataTemplates>
+        <local:ViewLocator/>
+    </Application.DataTemplates>
+  
+    <Application.Styles>
+        <FluentTheme />
+    </Application.Styles>
+    
+    <Application.Resources>
+        <converters:StatusColorConverter x:Key="StatusColorConverter"/>
+        <converters:StringNotEmptyConverter x:Key="StringNotEmptyConverter"/>
+        <converters:BoolToPreviewTextConverter x:Key="BoolToPreviewTextConverter"/>
+        <converters:NullToBoolConverter x:Key="NullToBoolConverter"/>
+        <converters:BoolToAnalysisTextConverter x:Key="BoolToAnalysisTextConverter"/>
+        <converters:ZeroToBoolConverter x:Key="ZeroToBoolConverter"/>
+    </Application.Resources>
+</Application>

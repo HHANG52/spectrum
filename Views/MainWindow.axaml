@@ -1,0 +1,341 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:spectrum.ViewModels"
+        xmlns:converters="using:spectrum.Models.Converters"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="1920" d:DesignHeight="1080"
+        x:Class="spectrum.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Icon="/Assets/avalonia-logo.ico"
+        Title="spectrum">
+
+    <Design.DataContext>
+        <vm:MainWindowViewModel />
+    </Design.DataContext>
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary>
+                    <converters:BoolToRecordingTextConverter x:Key="BoolToRecordingTextConverter" />
+                    <converters:BoolToRecordingColorConverter x:Key="BoolToRecordingColorConverter" />
+                    <converters:BoolToPreviewTextConverter x:Key="BoolToPreviewTextConverter" />
+                    <converters:BoolToAnalysisTextConverter x:Key="BoolToAnalysisTextConverter" />
+                    <converters:StatusColorConverter x:Key="StatusColorConverter" />
+                    <converters:StringNotEmptyConverter x:Key="StringNotEmptyConverter" />
+                    <converters:NullToBoolConverter x:Key="NullToBoolConverter" />
+                    <converters:ZeroToBoolConverter x:Key="ZeroToBoolConverter" />
+                </ResourceDictionary>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <!-- <TextBlock Text="{Binding Greeting}" HorizontalAlignment="Center" VerticalAlignment="Center"/> -->
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />  <!-- 菜单栏 -->
+            <RowDefinition Height="Auto" />  <!-- 工具栏 -->
+            <RowDefinition Height="Auto" />     <!-- 主要内容区域 -->
+            <RowDefinition Height="*" />   <!-- 实时光谱显示区域 -->
+            <RowDefinition Height="Auto" />  <!-- 底部工具栏 -->
+        </Grid.RowDefinitions>
+
+        <!-- 菜单栏 -->
+        <Menu Grid.Row="0" Height="25" Background="LightGray">
+            <MenuItem Header="文件">
+                <MenuItem Header="保存光谱图像" />
+                <MenuItem Header="保存相机图像" />
+                <MenuItem Header="保存全部图像" />
+                <MenuItem Header="导出光谱数据" />
+            </MenuItem>
+            <MenuItem Header="视频输入控制" />
+            <MenuItem Header="校准波长" />
+            <MenuItem Header="导出数据分隔符" />
+            <MenuItem Header="语言" />
+            <MenuItem Header="帮助" />
+            <MenuItem Header="关于" />
+        </Menu>
+
+        <!-- 工具栏 -->
+        <Border Grid.Row="1" Height="30" Background="White" BorderBrush="Gray">
+            <StackPanel Orientation="Horizontal" Margin="5 ,5,5,0">
+                <Button Content="视频控制" Height="30" />
+                <Button Content="保存光谱图像" Height="30" />
+                <Button Content="保存相机图像" Height="30" Command="{Binding SaveSingleImageCommand}" />
+                <Button Content="保存全部图像" Height="30" />
+                <Button Content="选择保存目录" Height="30" Command="{Binding SelectSaveDirectoryCommand}" />
+                <Button Height="30" Command="{Binding ToggleRecordingCommand}">
+                    <TextBlock Text="{Binding IsRecording, Converter={StaticResource BoolToRecordingTextConverter}}" />
+                </Button>
+                <Button Content="运行/停止" Height="30" />
+            </StackPanel>
+        </Border>
+
+        <!-- 主要内容区域 -->
+        <Grid Grid.Row="2" Margin="5">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="350" />  <!-- 左侧控制面板 -->
+                <ColumnDefinition Width="*" />    <!-- 右侧显示区域 -->
+            </Grid.ColumnDefinitions>
+
+            <!-- 左侧控制面板 -->
+            <Border Grid.Column="0" Background="LightYellow" BorderBrush="Black" BorderThickness="1" Margin="0,0,5,0">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="5">
+                        <!-- 视频输入设置 -->
+                        <TextBlock Text="视频输入设置" FontWeight="Bold" Margin="0,0,0,5" />
+                        <Grid Margin="0,0,0,8" ColumnDefinitions="*,Auto">
+                            <ComboBox x:Name="CameraList" Grid.Column="0" HorizontalAlignment="Stretch"
+                                      ItemsSource="{Binding Cameras}" 
+                                      SelectedItem="{Binding SelectedCamera}"
+                                      IsEnabled="{Binding !IsLoading}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Name}" ToolTip.Tip="{Binding Description}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            
+                            <Button Grid.Column="1" Margin="5,0,0,0" 
+                                    Command="{Binding LoadCamerasCommand}"
+                                    IsEnabled="{Binding !IsLoading}"
+                                    ToolTip.Tip="刷新摄像头列表">
+                                <TextBlock Text="刷新" />
+                            </Button>
+                        </Grid>
+                        
+                        <TextBlock Text="{Binding StatusMessage}" 
+                                   Foreground="{Binding StatusMessage, Converter={StaticResource StatusColorConverter}}"
+                                   Margin="0,0,0,8" 
+                                   IsVisible="{Binding StatusMessage, Converter={StaticResource StringNotEmptyConverter}}" />
+                        <UniformGrid Columns="3" Margin="0,2,0,8" ColumnSpacing="10">
+                            <TextBox Width="100" Height="20" Text="{Binding VideoResolution}" IsReadOnly="True" />
+                            <TextBox Width="100" Height="20" Text="{Binding VideoFps}" IsReadOnly="True" />
+                            <TextBox Width="100" Height="20" Text="{Binding VideoDelay}" IsReadOnly="True" />
+                        </UniformGrid>
+
+                        <!-- 摄像头数据录制 -->
+                        <TextBlock Text="摄像头数据录制" FontWeight="Bold" Margin="0,8,0,5" />
+                        
+                        <!-- 保存选项 -->
+                        <TextBlock Text="保存选项:" Margin="0,2,0,2" FontSize="12" />
+                        <StackPanel Margin="5,0,0,5">
+                            <CheckBox Content="保存原始帧" IsChecked="{Binding SaveRawFrames}" Margin="0,1" />
+                            <CheckBox Content="保存处理后图像" IsChecked="{Binding SaveProcessedFrames}" Margin="0,1" />
+                            <CheckBox Content="录制视频文件" IsChecked="{Binding RecordVideo}" Margin="0,1" />
+                        </StackPanel>
+                        
+                        <!-- 录制状态 -->
+                        <Grid Margin="0,2,0,5">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="录制状态:" VerticalAlignment="Center" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding RecordingStatus}" 
+                                       VerticalAlignment="Center" FontWeight="Bold"
+                                       Foreground="{Binding IsRecording, Converter={StaticResource BoolToRecordingColorConverter}}" />
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="已录制帧数:" VerticalAlignment="Center" Margin="0,2,0,0" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding RecordedFrameCount}" 
+                                       VerticalAlignment="Center" Margin="0,2,0,0" />
+
+                            <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,5,0,0">
+                                <Button Content="选择保存目录" Height="30" Margin="0,0,5,0"
+                                        Command="{Binding SelectSaveDirectoryCommand}" />
+                                <Button Height="30"  Command="{Binding ToggleRecordingCommand}">
+                                    <TextBlock Text="{Binding IsRecording, Converter={StaticResource BoolToRecordingTextConverter}}" />
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <!-- 右侧显示区域 -->
+            <Border Grid.Column="1" Background="LightGray" BorderBrush="Black" BorderThickness="1">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="450" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <!-- 图像显示区域 -->
+                    <Grid Grid.Row="0" Margin="5">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- 左侧控制 -->
+                        <StackPanel Grid.Column="0" Background="LightYellow" Width="125" Margin="0,0,5,0">
+                            <CheckBox Content="翻转" Margin="5,10,5,5" />
+                            <TextBlock Text="高度 Y" Margin="5,10,5,2" />
+                            <NumericUpDown Value="{Binding AnalysisRegionHeight}" Width="120" Height="20" Margin="0,2,0,5" Minimum="1" Maximum="400" Increment="1" ShowButtonSpinner="True" AllowSpin="True" FormatString="0" HorizontalContentAlignment="Center" />
+                            <TextBlock Text="起始 Y" Margin="5,10,5,2" />
+                            <NumericUpDown Value="{Binding AnalysisRegionStartY}" Width="120" Height="22" Margin="0,2,0,5" Minimum="0" Maximum="300" Increment="1" ShowButtonSpinner="True" AllowSpin="True" FormatString="0" HorizontalContentAlignment="Center" />
+                        </StackPanel>
+
+                        <!-- 图像显示 -->
+                        <Border Grid.Column="1" Background="DarkGray" BorderBrush="Black" BorderThickness="1">
+                            <Grid>
+                                <Image Source="{Binding CameraPreviewImage, FallbackValue={x:Null}}" 
+                                       Stretch="Fill" />
+                                
+                                <!-- 分析区域框线 -->
+                                <Canvas IsHitTestVisible="True"
+                                        IsVisible="{Binding ShowAnalysisRegion}">
+                                    <!-- 分析区域矩形 -->
+                                    <Rectangle Canvas.Left="{Binding AnalysisRegion.X}"
+                                               Canvas.Top="{Binding AnalysisRegion.Y}"
+                                               Width="{Binding AnalysisRegion.Width}"
+                                               Height="{Binding AnalysisRegion.Height}"
+                                               Stroke="Red"
+                                               StrokeThickness="2"
+                                               Fill="Transparent" />
+                                </Canvas>
+                                
+                                <!-- 预览控制按钮 -->
+                                <StackPanel HorizontalAlignment="Right" VerticalAlignment="Top" Margin="10">
+                                    <Button Command="{Binding TogglePreviewCommand}" 
+                                            Padding="8,4"
+                                            Background="#80000000" Foreground="White"
+                                            Margin="0,0,0,5">
+                                        <TextBlock Text="{Binding IsPreviewRunning, Converter={StaticResource BoolToPreviewTextConverter}}" />
+                                    </Button>
+                                    
+                                    <Button Command="{Binding ToggleAnalysisRegionCommand}" 
+                                            Padding="8,4"
+                                            Background="#80000000" Foreground="White">
+                                        <TextBlock Text="{Binding ShowAnalysisRegion, Converter={StaticResource BoolToAnalysisTextConverter}}" />
+                                    </Button>
+                                </StackPanel>
+                                
+                                <!-- 无预览时的提示 -->
+                                <TextBlock Text="无摄像头预览" 
+                                           HorizontalAlignment="Center" 
+                                           VerticalAlignment="Center"
+                                           FontSize="20" 
+                                           Foreground="White"
+                                           IsVisible="{Binding CameraPreviewImage, Converter={StaticResource NullToBoolConverter}}" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+
+                    <!-- 坐标轴设置 -->
+                    <Border Grid.Row="1" Background="LightYellow" Height="30" BorderBrush="Black"
+                            BorderThickness="0,1,0,0">
+                        <Grid Margin="90,0,10,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="60" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="60" />
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Column="0" Text="起始 X" VerticalAlignment="Center" Margin="0,0,5,0" />
+                            <TextBox Grid.Column="1" Text="0" Height="22" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="3" Text="结束 X" VerticalAlignment="Center" Margin="0,0,5,0" />
+                            <TextBox Grid.Column="4" Text="1000" Height="22" VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- 实时光谱显示区域 -->
+        <Border Grid.Row="3" Background="White" BorderBrush="Black" BorderThickness="1" Margin="5,0,5,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="实时光谱" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,5,0,5" />
+                <DockPanel Grid.Row="1" LastChildFill="True" Margin="5">
+                    <!-- 坐标轴和光谱图容器 -->
+                    <Canvas DockPanel.Dock="Top" Height="180">
+                        <!-- 背景网格线和坐标轴 -->
+                        <!-- Y轴 -->
+                        <Line StartPoint="50,10" EndPoint="50,160" Stroke="Black" StrokeThickness="1" />
+                        <!-- X轴 -->
+                        <Line StartPoint="50,160" EndPoint="780,160" Stroke="Black" StrokeThickness="1" />
+                        
+                        <!-- Y轴刻度和标签 -->
+                        <Line StartPoint="45,10" EndPoint="55,10" Stroke="Black" StrokeThickness="1" />
+                        <TextBlock Canvas.Left="10" Canvas.Top="5" Text="100" FontSize="10" />
+                        
+                        <Line StartPoint="45,50" EndPoint="55,50" Stroke="Black" StrokeThickness="1" />
+                        <TextBlock Canvas.Left="15" Canvas.Top="45" Text="75" FontSize="10" />
+                        
+                        <Line StartPoint="45,90" EndPoint="55,90" Stroke="Black" StrokeThickness="1" />
+                        <TextBlock Canvas.Left="15" Canvas.Top="85" Text="50" FontSize="10" />
+                        
+                        <Line StartPoint="45,130" EndPoint="55,130" Stroke="Black" StrokeThickness="1" />
+                        <TextBlock Canvas.Left="15" Canvas.Top="125" Text="25" FontSize="10" />
+                        
+                        <Line StartPoint="45,160" EndPoint="55,160" Stroke="Black" StrokeThickness="1" />
+                        <TextBlock Canvas.Left="20" Canvas.Top="155" Text="0" FontSize="10" />
+                        
+                        <!-- X轴刻度和标签 -->
+                        <Line StartPoint="50,160" EndPoint="50,165" Stroke="Black" StrokeThickness="1" />
+                        <TextBlock Canvas.Left="40" Canvas.Top="165" Text="0" FontSize="10" />
+                        
+                        <Line StartPoint="225,160" EndPoint="225,165" Stroke="Black" StrokeThickness="1" />
+                        <TextBlock Canvas.Left="210" Canvas.Top="165" Text="25%" FontSize="10" />
+                        
+                        <Line StartPoint="400,160" EndPoint="400,165" Stroke="Black" StrokeThickness="1" />
+                        <TextBlock Canvas.Left="385" Canvas.Top="165" Text="50%" FontSize="10" />
+                        
+                        <Line StartPoint="575,160" EndPoint="575,165" Stroke="Black" StrokeThickness="1" />
+                        <TextBlock Canvas.Left="560" Canvas.Top="165" Text="75%" FontSize="10" />
+                        
+                        <Line StartPoint="750,160" EndPoint="750,165" Stroke="Black" StrokeThickness="1" />
+                        <TextBlock Canvas.Left="735" Canvas.Top="165" Text="100%" FontSize="10" />
+                        
+                        <!-- 光谱数据绘制 -->
+                        <Polyline Points="{Binding SpectrumPoints}" 
+                                 Stroke="Blue" 
+                                 StrokeThickness="2" 
+                                 Canvas.Left="50"
+                                 Canvas.Top="10"
+                                 Width="730"
+                                 Height="150" />
+                        
+                        <!-- 无数据提示 -->
+                        <TextBlock Text="无光谱数据" 
+                                   Canvas.Left="350"
+                                   Canvas.Top="70"
+                                   FontSize="20" 
+                                   Foreground="Gray"
+                                   IsVisible="{Binding SpectrumData.Count, Converter={StaticResource ZeroToBoolConverter}}" />
+                    </Canvas>
+                </DockPanel>
+            </Grid>
+        </Border>
+
+        <!-- 底部工具栏 -->
+        <Border Grid.Row="4" Background="LightGray" BorderBrush="Gray" BorderThickness="0,1,0,0" Height="35">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"
+                        Margin="0,0,10,0">
+                <Button Content="参考" Width="40" Height="25" Margin="2" />
+                <Button Content="极小值" Width="50" Height="25" Margin="2" />
+                <Button Content="极大值" Width="50" Height="25" Margin="2" />
+                <Button Content="颜色" Width="40" Height="25" Margin="2" />
+                <Button Content="Filter" Width="50" Height="25" Margin="2" />
+                <TextBox Width="100" Height="22" Margin="5,0,2,0" VerticalAlignment="Center" />
+                <Button Content="Trim scale" Width="80" Height="25" Margin="2" />
+            </StackPanel>
+        </Border>
+    </Grid>
+
+</Window>
