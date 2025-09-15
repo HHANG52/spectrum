@@ -415,10 +415,7 @@ namespace spectrum.Models
                 // 保存原始BGRA数据（如果正在录制且启用了原始帧保存选项）
                 if (_dataSaveService?.IsRecording == true && _dataSaveService.Options.SaveRawFrames)
                 {
-                    // 复制原始BGRA数据
-                    byte[] bgraData = new byte[_pipeBuffer.Length];
-                    Array.Copy(_pipeBuffer, bgraData, _pipeBuffer.Length);
-                    _dataSaveService.SaveRawFrame(bgraData, _pipeW, _pipeH, "bin", true);
+                    _dataSaveService.SaveRawFrame(_pipeBuffer, _pipeW, _pipeH, "bin", true);
                 }
 
                 var wb = new WriteableBitmap(
@@ -496,8 +493,9 @@ namespace spectrum.Models
                 // 保存原始数据（统一保存为 BGRA）
                 if (_dataSaveService?.IsRecording == true && _dataSaveService.Options.SaveRawFrames)
                 {
-                    byte[] bgraData = bgra.ToBytes();
-                    _dataSaveService.SaveRawFrame(bgraData, _previewWidth, _previewHeight, "bin", true);
+                    int dataSize = _previewWidth * _previewHeight * 4;
+                    ReadOnlySpan<byte> span = new ReadOnlySpan<byte>((byte*)bgra.Data.ToPointer(), dataSize);
+                    _dataSaveService.SaveRawFrame(span, _previewWidth, _previewHeight, "bin", true);
                 }
 
                 try

@@ -301,84 +301,82 @@ namespace spectrum.Models
         /// <summary>
         /// 保存原始帧数据（Windows预览循环使用）
         /// </summary>
-        public void SaveRawFrame(byte[] frameData, int width, int height, string format = "bin",
+        public void SaveRawFrame(ReadOnlySpan<byte> frameData, int width, int height, string format = "bin",
             bool saveProcessed = true)
         {
-            if (!_isRecording || frameData == null || frameData.Length == 0) return;
+            if (!_isRecording || frameData.IsEmpty) return;
 
-            Task.Run(() =>
+            try
             {
-                try
+                lock (_lockObject)
                 {
-                    lock (_lockObject)
+                    if (!_isRecording) return;
+
+                    // 使用帧头帧尾结构保存二进制数据
+                    if (Options.EnableFrameStructure && Options.SaveRawFrames)
                     {
-                        if (!_isRecording) return;
+                        // 自动检测像素格式：计算每像素字节数
+                        int bytesPerPixel = frameData.Length / (width * height);
+                        WriteFrameWithStructure(frameData, width, height, bytesPerPixel);
+                    }
+                    else if (Options.SaveRawFrames)
+                    {
+                        // 传统保存方式
+                        string frameFileName = $"frame_{_frameCounter:D6}.{format}";
+                        string rawPath = Path.Combine(_saveDirectory!, "RawFrames", frameFileName);
+                        using var fs = new FileStream(rawPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+                        fs.Write(frameData);
+                    }
 
-                        // 使用帧头帧尾结构保存二进制数据
-                        if (Options.EnableFrameStructure && Options.SaveRawFrames)
+                    // 根据选项保存处理后的帧（如果需要）
+                    if (Options.SaveProcessedFrames && saveProcessed)
+                    {
+                        // 将原始数据转换为Mat进行处理
+                        unsafe
                         {
-                            // 自动检测像素格式：计算每像素字节数
-                            int bytesPerPixel = frameData.Length / (width * height);
-                            WriteFrameWithStructure(frameData, width, height, bytesPerPixel);
-                        }
-                        else if (Options.SaveRawFrames)
-                        {
-                            // 传统保存方式
-                            string frameFileName = $"frame_{_frameCounter:D6}.{format}";
-                            string rawPath = Path.Combine(_saveDirectory!, "RawFrames", frameFileName);
-                            File.WriteAllBytes(rawPath, frameData);
-                        }
-
-                        // 根据选项保存处理后的帧（如果需要）
-                        if (Options.SaveProcessedFrames && saveProcessed)
-                        {
-                            // 将原始数据转换为Mat进行处理
-                            unsafe
+                            fixed (byte* ptr = frameData)
                             {
-                                fixed (byte* ptr = frameData)
-                                {
-                                    using var mat = Mat.FromPixelData(height, width, MatType.CV_8UC3, (IntPtr)ptr,
-                                        width * 3);
-                                    using var processed = new Mat();
+                                using var mat = Mat.FromPixelData(height, width, MatType.CV_8UC3, (IntPtr)ptr,
+                                    width * 3);
+                                using var processed = new Mat();
 
-                                    // 转换为灰度图作为处理示例
-                                    Cv2.CvtColor(mat, processed, ColorConversionCodes.BGR2GRAY);
+                                // 转换为灰度图作为处理示例
+                                Cv2.CvtColor(mat, processed, ColorConversionCodes.BGR2GRAY);
 
-                                    string processedPath = Path.Combine(_saveDirectory!, "ProcessedFrames",
-                                        $"processed_{_frameCounter:D6}.png");
-                                    Cv2.ImWrite(processedPath, processed);
-                                }
+                                string processedPath = Path.Combine(_saveDirectory!, "ProcessedFrames",
+                                    $"processed_{_frameCounter:D6}.png");
+                                Cv2.ImWrite(processedPath, processed);
                             }
-                        }
-
-                        // 根据选项写入视频文件
-                        if (Options.RecordVideo)
-                        {
-                            unsafe
-                            {
-                                fixed (byte* ptr = frameData)
-                                {
-                                    using var mat = Mat.FromPixelData(height, width, MatType.CV_8UC3, (IntPtr)ptr,
-                                        width * 3);
-                                    _videoWriter?.Write(mat);
-                                }
-                            }
-                        }
-
-                        _frameCounter++;
-
-                        // 每100帧更新一次状态
-                        if (_frameCounter % 100 == 0)
-                        {
-                            RaiseStatusUpdated($"已保存 {_frameCounter} 帧");
                         }
                     }
+
+                    // 根据选项写入视频文件
+                    if (Options.RecordVideo)
+                    {
+                        unsafe
+                        {
+                            fixed (byte* ptr = frameData)
+                            {
+                                using var mat = Mat.FromPixelData(height, width, MatType.CV_8UC3, (IntPtr)ptr,
+                                    width * 3);
+                                _videoWriter?.Write(mat);
+                            }
+                        }
+                    }
+
+                    _frameCounter++;
+
+                    // 每100帧更新一次状态
+                    if (_frameCounter % 100 == 0)
+                    {
+                        RaiseStatusUpdated($"已保存 {_frameCounter} 帧");
+                    }
                 }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"保存帧数据时出错: {ex.Message}");
-                }
-            });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"保存帧数据时出错: {ex.Message}");
+            }
         }
         
 
@@ -462,7 +460,7 @@ namespace spectrum.Models
         /// <summary>
         /// 写入带帧头帧尾的二进制数据
         /// </summary>
-        private void WriteFrameWithStructure(byte[] frameData, int width, int height, int bytesPerPixel)
+        private void WriteFrameWithStructure(ReadOnlySpan<byte> frameData, int width, int height, int bytesPerPixel)
         {
             if (_currentBinaryFile == null) return;
 
@@ -498,7 +496,7 @@ namespace spectrum.Models
                 _currentBinaryFile.Write(headerBytes, 0, headerBytes.Length);
 
                 // 写入帧数据
-                _currentBinaryFile.Write(frameData, 0, frameData.Length);
+                _currentBinaryFile.Write(frameData);
 
                 // 写入帧尾
                 byte[] footerBytes = StructureToByteArray(frameFooter);
@@ -527,12 +525,12 @@ namespace spectrum.Models
         /// <summary>
         /// 查找最亮行（支持灰度图、BGR、BGRA格式）
         /// </summary>
-        private BrightestRowInfo FindBrightestRow(byte[] pixelData, int width, int height, int bytesPerPixel = 1)
+        private BrightestRowInfo FindBrightestRow(ReadOnlySpan<byte> pixelData, int width, int height, int bytesPerPixel = 1)
         {
             var result = new BrightestRowInfo { RowIndex = 0, RowData = null, AverageBrightness = 0 };
 
             // 输入验证
-            if (pixelData == null || pixelData.Length == 0)
+            if (pixelData.IsEmpty)
                 return result;
 
             int expectedLength = width * height * bytesPerPixel;
@@ -638,7 +636,7 @@ namespace spectrum.Models
         /// <summary>
         /// 计算校验和
         /// </summary>
-        private uint CalculateChecksum(byte[] data)
+        private uint CalculateChecksum(ReadOnlySpan<byte> data)
         {
             uint checksum = 0;
             foreach (byte b in data)
