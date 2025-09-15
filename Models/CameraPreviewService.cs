@@ -169,20 +169,20 @@ namespace spectrum.Models
 
             var pipelines = new[]
 {
-    // 优先 MJPEG：输入 mjpeg，输出强制 1280x720@31，BGRA 原始帧
+    // 优先 MJPEG：输入 mjpeg，输出 BGRA 原始帧（帧率按参数控制）
     $"-hide_banner -loglevel warning -fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0 " +
-    $"-f v4l2 -input_format mjpeg -framerate 31 -video_size {w}x{h} -i {devicePath} " +
-    $"-vf \"scale={w}:{h}:flags=fast_bilinear,fps=31,format=bgra\" -pix_fmt bgra -f rawvideo -",
+    $"-f v4l2 -input_format mjpeg -framerate {fps} -video_size {w}x{h} -i {devicePath} " +
+    $"-vf \"fps={fps}\" -pix_fmt bgra -f rawvideo -",
 
-    // 备选 YUYV422：同样输出 BGRA
+    // 备选 YUYV422：同样输出 BGRA，帧率按参数控制
     $"-hide_banner -loglevel warning -fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0 " +
-    $"-f v4l2 -input_format yuyv422 -framerate 31 -video_size {w}x{h} -i {devicePath} " +
-    $"-vf \"scale={w}:{h}:flags=fast_bilinear,fps=31,format=bgra\" -pix_fmt bgra -f rawvideo -",
+    $"-f v4l2 -input_format yuyv422 -framerate {fps} -video_size {w}x{h} -i {devicePath} " +
+    $"-vf \"fps={fps}\" -pix_fmt bgra -f rawvideo -",
 
-    // 兜底：让 v4l2 自选输入格式，输出端依旧强制
+    // 兜底：让 v4l2 自选输入格式，帧率按参数控制
     $"-hide_banner -loglevel warning -fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0 " +
-    $"-f v4l2 -framerate 31 -video_size {w}x{h} -i {devicePath} " +
-    $"-vf \"scale={w}:{h}:flags=fast_bilinear,fps=31,format=bgra\" -pix_fmt bgra -f rawvideo -"
+    $"-f v4l2 -framerate {fps} -video_size {w}x{h} -i {devicePath} " +
+    $"-vf \"fps={fps}\" -pix_fmt bgra -f rawvideo -"
 };
 
 
