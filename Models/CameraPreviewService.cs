@@ -405,42 +405,25 @@ namespace spectrum.Models
             continue;
         }
 
-        // 将外部 BGRA 缓冲“零拷贝”挂成 Mat，再直接 Blit 到 WriteableBitmap
+        // 将读取的 BGRA 数据直接拷贝到缓存的 WriteableBitmap
         try
         {
-            fixed (byte* p = _pipeBuffer)
+            // 保存原始BGRA数据（如果正在录制且启用了原始帧保存选项）
+            if (_dataSaveService?.IsRecording == true && _dataSaveService.Options.SaveRawFrames)
             {
-                using var bgra = Mat.FromPixelData(_pipeH, _pipeW, MatType.CV_8UC4, (IntPtr)p, _pipeStride);
+                byte[] bgraData = new byte[_pipeBuffer.Length];
+                Array.Copy(_pipeBuffer, bgraData, _pipeBuffer.Length);
+                _dataSaveService.SaveRawFrame(bgraData, _pipeW, _pipeH, "bin", true);
+            }
 
-                // 保存原始BGRA数据（如果正在录制且启用了原始帧保存选项）
-                if (_dataSaveService?.IsRecording == true && _dataSaveService.Options.SaveRawFrames)
+            if (_previewBitmap != null)
+            {
+                using var locked = _previewBitmap.Lock();
+                fixed (byte* src = _pipeBuffer)
                 {
-                    // 复制原始BGRA数据
-                    byte[] bgraData = new byte[_pipeBuffer.Length];
-                    Array.Copy(_pipeBuffer, bgraData, _pipeBuffer.Length);
-                    _dataSaveService.SaveRawFrame(bgraData, _pipeW, _pipeH, "bin", true);
+                    Buffer.MemoryCopy(src, (void*)locked.Address, _pipeBuffer.Length, _pipeBuffer.Length);
                 }
-
-                var wb = new WriteableBitmap(
-                    new PixelSize(_previewWidth, _previewHeight),
-                    new Vector(96, 96),
-                    PixelFormat.Bgra8888,
-                    AlphaFormat.Premul);
-
-                BlitBGRAtoBitmap(bgra, wb, _previewWidth, _previewHeight);
-
-                var old = _previewBitmap;
-                _previewBitmap = wb;
                 RaisePreviewImageUpdated(_previewBitmap);
-
-                if (old != null)
-                {
-                    Task.Run(() =>
-                    {
-                        Thread.Sleep(50);
-                        try { old.Dispose(); } catch { }
-                    });
-                }
             }
         }
         catch
@@ -502,25 +485,12 @@ namespace spectrum.Models
 
                 try
                 {
-                    var wb = new WriteableBitmap(
-                        new PixelSize(_previewWidth, _previewHeight),
-                        new Vector(96, 96),
-                        PixelFormat.Bgra8888,
-                        AlphaFormat.Premul);
-
-                    BlitBGRAtoBitmap(bgra, wb, _previewWidth, _previewHeight);
-
-                    var old = _previewBitmap;
-                    _previewBitmap = wb;
-                    RaisePreviewImageUpdated(_previewBitmap);
-
-                    if (old != null)
+                    if (_previewBitmap != null)
                     {
-                        Task.Run(() =>
-                        {
-                            Thread.Sleep(50);
-                            try { old.Dispose(); } catch { }
-                        });
+                        using var locked = _previewBitmap.Lock();
+                        int bytes = checked(_previewWidth * _previewHeight * 4);
+                        Buffer.MemoryCopy((void*)bgra.Data, (void*)locked.Address, bytes, bytes);
+                        RaisePreviewImageUpdated(_previewBitmap);
                     }
                 }
                 catch { }
@@ -540,16 +510,6 @@ namespace spectrum.Models
                 pos += n;
             }
             return true;
-        }
-
-        /// <summary>把 BGRA Mat 的像素拷到 Avalonia WriteableBitmap。</summary>
-        private static unsafe void BlitBGRAtoBitmap(Mat bgra, WriteableBitmap wb, int width, int height)
-        {
-            if (bgra.Empty()) return;
-            using var locked = wb.Lock();
-            int bytes = checked(width * height * 4);
-            IntPtr src = bgra.Data; // IntPtr，不再对 byte* 调用 ToPointer（避免 CS1061）
-            Buffer.MemoryCopy((void*)src, (void*)locked.Address, bytes, bytes);
         }
 
         private void RaisePreviewImageUpdated(IImage? image)
